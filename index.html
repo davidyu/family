@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>East Asian kinship tree</title>
+<style>
+  /* ---- Theme tokens: edit colors here ---- */
+  :root {
+    --bg: #faf9f6;
+    --text: #2c2c2a;
+    --text-muted: #6b6a64;
+    --border: #d9d7cf;
+    /* paternal side (jade) */
+    --pat-fill: #e1f5ee;
+    --pat-stroke: #0f6e56;
+    --pat-title: #085041;
+    --pat-sub: #0f6e56;
+    /* maternal side (persimmon) */
+    --mat-fill: #faece7;
+    --mat-stroke: #993c1d;
+    --mat-title: #712b13;
+    --mat-sub: #993c1d;
+    /* ego node (neutral) */
+    --ego-fill: #f1efe8;
+    --ego-stroke: #5f5e5a;
+    --ego-title: #2c2c2a;
+    --accent: #185fa5;
+    --accent-bg: #e6f1fb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1e1e1c;
+      --text: #e8e6de;
+      --text-muted: #a3a199;
+      --border: #44443f;
+      --pat-fill: #085041;
+      --pat-stroke: #5dcaa5;
+      --pat-title: #9fe1cb;
+      --pat-sub: #5dcaa5;
+      --mat-fill: #712b13;
+      --mat-stroke: #f0997b;
+      --mat-title: #f5c4b3;
+      --mat-sub: #f0997b;
+      --ego-fill: #444441;
+      --ego-stroke: #b4b2a9;
+      --ego-title: #f1efe8;
+      --accent: #85b7eb;
+      --accent-bg: #0c447c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 2rem 1rem;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  h1 {
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 24px;
+    font-weight: 500;
+    margin: 0 0 4px;
+  }
+  .subtitle { font-size: 14px; color: var(--text-muted); margin: 0 0 1.5rem; }
+  .langbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 1rem; }
+  .langbar button {
+    font-family: inherit;
+    font-size: 13px;
+    padding: 6px 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+  }
+  .langbar button:hover { border-color: var(--text-muted); }
+  .langbar button.active {
+    background: var(--accent-bg);
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+  svg { width: 100%; height: auto; display: block; }
+  svg text { font-family: inherit; }
+  .node { cursor: pointer; }
+  .node:hover rect { stroke-width: 1.5; }
+  .legend { display: flex; gap: 20px; font-size: 13px; color: var(--text-muted); margin: 8px 0 0; }
+  .legend span::before {
+    content: "";
+    display: inline-block;
+    width: 10px; height: 10px;
+    border-radius: 3px;
+    margin-right: 6px;
+  }
+  .legend .pat::before { background: var(--pat-fill); border: 1px solid var(--pat-stroke); }
+  .legend .mat::before { background: var(--mat-fill); border: 1px solid var(--mat-stroke); }
+  /* Detail panel: shown when a node is clicked */
+  #detail {
+    margin-top: 1.25rem;
+    padding: 1rem 1.25rem;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    font-size: 14px;
+    display: none;
+  }
+  #detail.show { display: block; }
+  #detail h3 {
+    font-family: Georgia, serif;
+    font-size: 17px;
+    font-weight: 500;
+    margin: 0 0 6px;
+  }
+  #detail p { margin: 0; color: var(--text-muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>East Asian kinship tree</h1>
+  <p class="subtitle">Terms for grandparents, uncles, and aunts. Tap a node for notes — the ⊕ under an uncle or aunt reveals the term for their partner.</p>
+  <div class="langbar" id="langbar"></div>
+  <div id="tree"></div>
+  <div class="legend">
+    <span class="pat">Father's side (nội / 内)</span>
+    <span class="mat">Mother's side (ngoại / 外)</span>
+  </div>
+  <div id="detail"></div>
+</div>
+
+<script>
+/* =========================================================
+   DATA — edit this section to add languages or change terms.
+
+   Each language entry:
+     label : button text
+     ln    : full display name
+     gp    : [paternal grandparents term, subtitle, detail note]
+     gm    : [maternal grandparents term, subtitle, detail note]
+     n     : seven nodes, left to right:
+             [ father's older brother, father's younger brother,
+               father's sister, Father, Mother,
+               mother's brother, mother's sister ]
+             each node = [term, subtitle, spouse, detail note]
+             spouse = [term, subtitle, detail note] or null;
+             clicking the node expands the spouse as a subtree.
+     you   : ego node label
+   ========================================================= */
+const LANGS = [
+  { id: 'vc', label: 'VN Central (Huế)' },
+  { id: 'vs', label: 'VN South' },
+  { id: 'zh', label: 'Mandarin' },
+  { id: 'ja', label: 'Japanese' },
+  { id: 'ko', label: 'Korean' }
+];
+
+const D = {
+vc: { ln: 'Central Vietnamese (Huế)',
+  gp: ['Ôn nội · Mệ nội', 'mệ = bà (Huế)',
+       'Huế uses ôn/mệ where the standard has ông/bà. Mệ also famously addresses Nguyễn royal descendants of any gender.'],
+  gm: ['Ôn ngoại · Mệ ngoại', 'ngoại = 外 outside',
+       'Ngoại ("outside") marks the mother’s side, from Chinese 外 — the same morpheme as Mandarin wài and Korean 외 (oe).'],
+  n: [
+    ['bác', '← 伯',
+     ['bác gái', '"female bác"',
+      'Wife of bác — his term plus gái (female). No dedicated term exists for her; she simply shares her husband’s title.'],
+     'Father’s older brother, from Chinese 伯. Unlike the North, Central usage keeps bác narrow — it does not extend to the mother’s older siblings.'],
+    ['chú', '← 叔',
+     ['thím', '← 婶',
+      'Wife of chú, from Chinese 婶 (Mandarin shěnshen) — one of the few in-marrying spouses with a dedicated term of her own.'],
+     'Father’s younger brother, from 叔 (Mandarin shūshu).'],
+    ['o', '= cô',
+     ['dượng', 'o’s husband',
+      'Husband of o. Dượng covers men who marry in — o’s husband, dì’s husband, and stepfathers all share the same word.'],
+     'The Central signature: o replaces cô for father’s sister. Thought to be a native retention rather than a Sinitic borrowing. In Huế, o also extends to young women generally.'],
+    ['Cha', 'father', null, 'Cha is the common Central term for father; bọ appears in Quảng Bình.'],
+    ['Mạ', 'mother', null, 'Mạ is the Huế form of mẹ.'],
+    ['cậu', '← 舅',
+     ['mự / mợ', 'cậu’s wife',
+      'Wife of cậu — mợ in standard usage, mự in Nghệ An–Hà Tĩnh.'],
+     'Mother’s brother, from 舅 (Mandarin jiùjiu).'],
+    ['dì', '← 姨',
+     ['dượng', 'dì’s husband',
+      'Husband of dì — the same dượng as o’s husband; men who marry in are lumped together.'],
+     'Mother’s sister, from 姨 (Mandarin yí).']
+  ],
+  you: 'Con (you)' },
+
+vs: { ln: 'Southern Vietnamese',
+  gp: ['Ông nội · Bà nội', 'nội = 内 inside',
+       'Nội ("inside") marks the father’s side, reflecting the patrilineal household as the "inner" line.'],
+  gm: ['Ông ngoại · Bà ngoại', 'ngoại = 外 outside',
+       'Ngoại ("outside") marks the mother’s side, from Chinese 外.'],
+  n: [
+    ['bác', 'Bác Hai, Ba…',
+     ['bác gái', 'shares his number',
+      'Wife of bác — his term plus gái (female). She inherits his birth-order number as well.'],
+     'Strictly father’s older brother in the South — mother’s older siblings stay cậu/dì regardless of age. Usually carries a birth-order number (Bác Hai, Bác Tư); numbering starts at Hai (two).'],
+    ['chú', 'Chú Ba, Tư…',
+     ['thím', '← 婶',
+      'Wife of chú, from 婶. She inherits his number: the wife of Chú Ba is Thím Ba.'],
+     'Father’s younger brother, from 叔. Numbered like bác (Chú Ba, Chú Út for the youngest). Also the polite address for any man younger than one’s father.'],
+    ['cô', '← 姑',
+     ['dượng', 'cô’s husband',
+      'Husband of cô — a term shared with dì’s husband and stepfathers.'],
+     'Father’s sister, from 姑 (Mandarin gūgu, Korean gomo).'],
+    ['Ba', 'father', null, 'Ba (also tía in the Mekong Delta) is the Southern term for father.'],
+    ['Má', 'mother', null, 'Má is the Southern term for mother.'],
+    ['cậu', '← 舅',
+     ['mợ', 'cậu’s wife',
+      'Wife of cậu, with a dedicated term of her own.'],
+     'Mother’s brother, from 舅. Applies regardless of his age relative to the mother.'],
+    ['dì', '← 姨',
+     ['dượng', 'dì’s husband',
+      'Husband of dì — the same word as cô’s husband; in-marrying men are lumped together.'],
+     'Mother’s sister, from 姨. Applies regardless of age in Southern usage.']
+  ],
+  you: 'Con (you)' },
+
+zh: { ln: 'Mandarin',
+  gp: ['爷爷 · 奶奶', 'yéye · nǎinai',
+       'Paternal grandparents. Formal/written forms are 祖父 zǔfù and 祖母 zǔmǔ.'],
+  gm: ['外公 · 外婆', 'wàigōng · wàipó',
+       '外 wài ("outside") marks the maternal side — the source morpheme for Vietnamese ngoại and Korean 외. Northern colloquial also uses 姥爷 lǎoye / 姥姥 lǎolao.'],
+  n: [
+    ['伯伯', 'bóbo',
+     ['伯母', 'bómǔ',
+      'Wife of 伯伯. Numbered along with her husband: 大伯母, 二伯母.'],
+     'Father’s older brother. Ranked numerically by birth order: 大伯 dàbó (eldest), 二伯 èrbó, and so on.'],
+    ['叔叔', 'shūshu',
+     ['婶婶', 'shěnshen',
+      'Wife of 叔叔, from 婶 — the source of Vietnamese thím.'],
+     'Father’s younger brother, ranked 二叔, 三叔 by position. Also the generic polite address for a man of one’s parents’ generation.'],
+    ['姑姑', 'gūgu',
+     ['姑父', 'gūfu',
+      'Husband of 姑姑 — also 姑丈 gūzhàng. The 父 (father) / 丈 marks a man who married in.'],
+     'Father’s sister — cognate with Vietnamese cô and Korean gomo (姑母).'],
+    ['爸爸', 'bàba', null, 'Father. Formal: 父亲 fùqīn.'],
+    ['妈妈', 'māma', null, 'Mother. Formal: 母亲 mǔqīn.'],
+    ['舅舅', 'jiùjiu',
+     ['舅妈', 'jiùmā',
+      'Wife of 舅舅 — also 舅母 jiùmǔ, or 妗子 jìnzi in Northern colloquial.'],
+     'Mother’s brother — cognate with Vietnamese cậu.'],
+    ['姨', 'yí / 阿姨',
+     ['姨夫', 'yífu',
+      'Husband of 姨 — also 姨丈 yízhàng.'],
+     'Mother’s sister — cognate with Vietnamese dì. Colloquially 大姨 (older than mother) vs 小姨 (younger). 阿姨 āyí doubles as the address for any middle-aged woman.']
+  ],
+  you: '我 (you)' },
+
+ja: { ln: 'Japanese',
+  gp: ['おじいさん · おばあさん', 'no side distinction',
+       'Japanese does not distinguish paternal from maternal grandparents in speech. 父方の (father’s side) or 母方の (mother’s side) is added only when it matters.'],
+  gm: ['おじいさん · おばあさん', 'same words',
+       'Identical to the paternal terms — the side distinction collapsed in Japanese.'],
+  n: [
+    ['おじさん', '伯父 (older)',
+     ['おばさん', '伯母',
+      'His wife — spoken obasan like every aunt; written 伯母 because her husband is older than the parent.'],
+     'Uncle older than the parent. Spoken form is identical for all uncles; the age distinction survives only in writing: 伯父 (older than parent) vs 叔父 (younger) — both read "oji". 伯 and 叔 are the same characters behind bác/bóbo and chú/shūshu.'],
+    ['おじさん', '叔父 (younger)',
+     ['おばさん', '叔母',
+      'His wife — written 叔母, following her husband’s position relative to the parent.'],
+     'Uncle younger than the parent — written 叔父, spoken identically to 伯父. A fossil of the Chinese system preserved in kanji only.'],
+    ['おばさん', '伯母 / 叔母',
+     ['おじさん', '伯父 / 叔父',
+      'Her husband — spoken ojisan like every uncle; the kanji follows his wife’s age relative to the parent.'],
+     'Aunt — one spoken word for father’s sister, mother’s sister, and aunts by marriage. Written 伯母 or 叔母 depending on age relative to the parent.'],
+    ['父', 'chichi', null, 'One’s own father (humble). お父さん otōsan when addressing him or referring to someone else’s.'],
+    ['母', 'haha', null, 'One’s own mother (humble). お母さん okāsan when addressing her.'],
+    ['おじさん', '伯父 / 叔父',
+     ['おばさん', '伯母 / 叔母',
+      'His wife — the same spoken obasan; marriage adds no new word in Japanese.'],
+     'Mother’s brother — same spoken word as paternal uncles. No side distinction survives in speech.'],
+    ['おばさん', '伯母 / 叔母',
+     ['おじさん', '伯父 / 叔父',
+      'Her husband — the same spoken ojisan as blood uncles.'],
+     'Mother’s sister — same spoken word as paternal aunts. Ojisan/obasan also address unrelated middle-aged adults, like Vietnamese chú/cô and Mandarin 叔叔/阿姨.']
+  ],
+  you: '私 (you)' },
+
+ko: { ln: 'Korean',
+  gp: ['할아버지 · 할머니', 'harabeoji · halmeoni',
+       'Paternal grandparents by default — the unmarked forms belong to the father’s side.'],
+  gm: ['외할아버지 · 외할머니', '외 = 外 outside',
+       'The 외 (oe) prefix is 外 — the same "outside" morpheme as Vietnamese ngoại and Mandarin wài, bolted onto native Korean words.'],
+  n: [
+    ['큰아버지', '"big father"',
+     ['큰어머니', '"big mother"',
+      'Wife of 큰아버지 — keun-eomeoni, "big mother", mirroring her husband’s title.'],
+     'Father’s older brother — literally "big father" (keun-abeoji). Korean grades paternal uncles as versions of the father.'],
+    ['작은아버지', '삼촌 if unmarried',
+     ['작은어머니', '"small mother"',
+      'Wife of 작은아버지 — jageun-eomeoni, "small mother"; also 숙모 sungmo (叔母).'],
+     'Father’s younger brother — "small father" (jageun-abeoji) once married; 삼촌 samchon (from 三寸, three degrees) while unmarried. Korean is unique in renaming the uncle at marriage.'],
+    ['고모', 'gomo ← 姑母',
+     ['고모부', 'gomobu',
+      'Husband of 고모 — the -부 is 夫 (husband): her term plus a marriage marker.'],
+     'Father’s sister — 姑母, the same 姑 as Vietnamese cô and Mandarin gūgu.'],
+    ['아버지', 'abeoji', null, 'Father. 아빠 appa is the informal form.'],
+    ['어머니', 'eomeoni', null, 'Mother. 엄마 eomma is the informal form.'],
+    ['외삼촌', 'oe-samchon ← 舅',
+     ['외숙모', 'oe-sungmo',
+      'Wife of 외삼촌 — 외숙모 is 叔母 with the 외 (outside) prefix; the 숙 is the same 叔 as in chú and shūshu.'],
+     'Mother’s brother — samchon with the 외 (outside) prefix.'],
+    ['이모', 'imo ← 姨母',
+     ['이모부', 'imobu',
+      'Husband of 이모 — 이모 plus 부 (夫, husband).'],
+     'Mother’s sister — 姨母, cognate with Vietnamese dì and Mandarin yí. 이모 also warmly addresses unrelated women, e.g. restaurant staff.']
+  ],
+  you: '나 (you)' }
+};
+
+const REL = ["Father's older brother", "Father's younger brother", "Father's sister",
+             "Father", "Mother", "Mother's brother", "Mother's sister"];
+/* blood relatives who are men — their partner is a wife; the rest, a husband */
+const MALE = new Set([0, 1, 5]);
+
+/* =========================================================
+   LAYOUT — node coordinates. X = left edge of the seven
+   middle-generation boxes; W/CY/CH = width, top, height.
+   Spouse boxes expand at SY below the clicked node.
+   ========================================================= */
+let cur = 'vc';
+let expanded = null;   /* index of the node whose spouse subtree is open */
+const X = [6, 102, 198, 294, 390, 486, 582], W = 92, CY = 114, CH = 64;
+const SY = 214, SH = 52;
+
+function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+
+function nodeBox(side, x, y, w, h, lines, detailIdx, badge) {
+  const c = side === 'p' ? 'pat' : side === 'm' ? 'mat' : 'ego';
+  let s = '<g class="node" data-detail="' + detailIdx + '">' +
+    '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="8"' +
+    ' fill="var(--' + c + '-fill)" stroke="var(--' + c + '-stroke)" stroke-width="0.75"/>';
+  lines.forEach(l => {
+    if (!l.t) return;
+    s += '<text x="' + (x + w / 2) + '" y="' + l.y + '" text-anchor="middle" dominant-baseline="central"' +
+      ' fill="var(--' + c + '-' + l.role + ')" font-size="' + l.fs + '"' +
+      (l.role === 'title' ? ' font-weight="500"' : '') + '>' + esc(l.t) + '</text>';
+  });
+  /* expand/collapse badge on the bottom edge for nodes with a partner */
+  if (badge) {
+    const bx = x + w / 2, by = y + h;
+    s += '<circle cx="' + bx + '" cy="' + by + '" r="7" fill="var(--bg)"' +
+      ' stroke="var(--' + c + '-stroke)" stroke-width="0.75"/>' +
+      '<text x="' + bx + '" y="' + (by + 0.5) + '" text-anchor="middle" dominant-baseline="central"' +
+      ' fill="var(--' + c + '-sub)" font-size="11" font-weight="600">' +
+      (badge === 'open' ? '−' : '+') + '</text>';
+  }
+  return s + '</g>';
+}
+
+function connector(x1, y1, x2, y2, wd) {
+  return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 +
+    '" stroke="var(--text-muted)" stroke-width="' + (wd || 0.75) + '"/>';
+}
+
+function render() {
+  document.getElementById('langbar').innerHTML = LANGS.map(l =>
+    '<button data-lang="' + l.id + '" class="' + (l.id === cur ? 'active' : '') + '">' + l.label + '</button>'
+  ).join('');
+
+  const d = D[cur];
+  let s = '<svg viewBox="0 0 680 278" role="img" aria-label="Kinship tree for ' + d.ln + '">';
+
+  /* connectors: paternal grandparents -> bus -> four children */
+  s += connector(196, 74, 196, 96) + connector(52, 96, 340, 96);
+  [52, 148, 244, 340].forEach(x => s += connector(x, 96, x, 114));
+  /* maternal grandparents -> bus -> three children */
+  s += connector(532, 74, 532, 96) + connector(436, 96, 628, 96);
+  [436, 532, 628].forEach(x => s += connector(x, 96, x, 114));
+  /* marriage line between Father and Mother, then down to ego */
+  s += connector(386, 146, 390, 146, 1.5) + connector(388, 146, 388, 210);
+
+  /* expanded spouse subtree: double marriage line down to the partner box */
+  if (expanded !== null && d.n[expanded][2]) {
+    const cx = X[expanded] + W / 2;
+    s += connector(cx - 2, CY + CH, cx - 2, SY) + connector(cx + 2, CY + CH, cx + 2, SY);
+  }
+
+  /* grandparent boxes (detail indices 100 and 101) */
+  s += nodeBox('p', 116, 20, 160, 54,
+    [{ t: d.gp[0], y: 40, role: 'title', fs: 13 }, { t: d.gp[1], y: 58, role: 'sub', fs: 11 }], 100);
+  s += nodeBox('m', 452, 20, 160, 54,
+    [{ t: d.gm[0], y: 40, role: 'title', fs: 13 }, { t: d.gm[1], y: 58, role: 'sub', fs: 11 }], 101);
+
+  /* seven middle-generation boxes (detail indices 0-6) */
+  d.n.forEach((n, i) => {
+    const side = i < 4 ? 'p' : 'm', x = X[i];
+    const lines = [{ t: n[0], y: 138, role: 'title', fs: 13 }, { t: n[1], y: 156, role: 'sub', fs: 11 }];
+    const badge = n[2] ? (expanded === i ? 'open' : 'closed') : null;
+    s += nodeBox(side, x, CY, W, CH, lines, i, badge);
+  });
+
+  /* expanded spouse box (detail index 200 + blood relative's index) */
+  if (expanded !== null && d.n[expanded][2]) {
+    const sp = d.n[expanded][2], x = X[expanded];
+    s += nodeBox(expanded < 4 ? 'p' : 'm', x, SY, W, SH,
+      [{ t: sp[0], y: SY + 20, role: 'title', fs: 13 }, { t: sp[1], y: SY + 37, role: 'sub', fs: 11 }],
+      200 + expanded);
+  }
+
+  /* ego box (detail index 102) */
+  s += nodeBox('e', 342, 210, 92, 40, [{ t: d.you, y: 230, role: 'title', fs: 13 }], 102);
+  s += '</svg>';
+  document.getElementById('tree').innerHTML = s;
+  document.getElementById('detail').classList.remove('show');
+}
+
+function showDetail(idx) {
+  const d = D[cur], panel = document.getElementById('detail');
+  let title, body;
+  if (idx === 100)      { title = d.gp[0]; body = d.gp[2]; }
+  else if (idx === 101) { title = d.gm[0]; body = d.gm[2]; }
+  else if (idx === 102) { title = d.you;   body = 'The ego / speaker node. In Vietnamese you would self-refer as con (child) to all of these relatives; pronoun choice shifts with each relationship.'; }
+  else if (idx >= 200)  {
+    const i = idx - 200, sp = d.n[i][2];
+    title = sp[0] + ' — ' + (MALE.has(i) ? 'wife of ' : 'husband of ') + d.n[i][0];
+    body = sp[2];
+  }
+  else                  { title = d.n[idx][0] + ' — ' + REL[idx]; body = d.n[idx][3]; }
+  panel.innerHTML = '<h3>' + esc(title) + '</h3><p>' + esc(body) + '</p>';
+  panel.classList.add('show');
+}
+
+/* event delegation */
+document.getElementById('langbar').addEventListener('click', e => {
+  const b = e.target.closest('button[data-lang]');
+  if (b) { cur = b.dataset.lang; expanded = null; render(); }
+});
+document.getElementById('tree').addEventListener('click', e => {
+  const g = e.target.closest('.node');
+  if (!g) return;
+  const idx = Number(g.dataset.detail);
+  /* uncles and aunts toggle their partner's subtree */
+  if (idx < 7 && D[cur].n[idx][2]) {
+    expanded = (expanded === idx ? null : idx);
+    render();
+  }
+  showDetail(idx);
+});
+
+render();
+</script>
+</body>
+</html>
